@@ -87,6 +87,11 @@ impl Timestamp {
         DEFAULT_FACTORY.lock().unwrap().now()
     }
 
+    #[cfg(feature = "httpdate")]
+    pub fn parse_http_date(date: &str) -> Result<Self, httpdate::Error> {
+        httpdate::parse_http_date(date).map(Timestamp::from)
+    }
+
     /// Return big endian bytes representation of this timestamp.
     pub fn to_bytes(&self) -> [u8; 8] {
         self.0.to_be_bytes()
@@ -95,6 +100,11 @@ impl Timestamp {
     /// Return the internal `u64` representation of this [Timestamp].
     pub fn as_u64(&self) -> u64 {
         self.0
+    }
+
+    #[cfg(feature = "httpdate")]
+    pub fn format_http_date(&self) -> String {
+        httpdate::fmt_http_date(self.to_owned().into())
     }
 }
 
@@ -191,7 +201,7 @@ impl Sub<u64> for Timestamp {
     type Output = Timestamp;
 
     fn sub(self, rhs: u64) -> Self::Output {
-        Timestamp(self.0.checked_sub(rhs).unwrap_or(0))
+        self.0.saturating_sub(rhs).into()
     }
 }
 
@@ -203,7 +213,7 @@ impl AddAssign<u64> for Timestamp {
 
 impl SubAssign<u64> for Timestamp {
     fn sub_assign(&mut self, other: u64) {
-        self.0 = self.0.checked_sub(other).unwrap_or(0);
+        self.0 = self.0.saturating_sub(other);
     }
 }
 
@@ -231,7 +241,7 @@ impl AddAssign<Timestamp> for Timestamp {
 
 impl SubAssign<Timestamp> for Timestamp {
     fn sub_assign(&mut self, other: Timestamp) {
-        self.0 = self.0.checked_sub(other.0).unwrap_or(0);
+        self.0 = self.0.saturating_sub(other.0)
     }
 }
 
@@ -266,10 +276,10 @@ impl Display for Timestamp {
         #[cfg(feature = "base32")]
         {
             let bytes: [u8; 8] = self.to_owned().into();
-            return f.write_str(&base32::encode(base32::Alphabet::Crockford, &bytes));
+            f.write_str(&base32::encode(base32::Alphabet::Crockford, &bytes))
         }
         #[cfg(not(feature = "base32"))]
-        return f.write_str(&format!("Timestamp ({})", self.0));
+        f.write_str(&format!("Timestamp ({})", self.0))
     }
 }
 
@@ -321,7 +331,7 @@ impl Error for InvalidEncoding {}
 
 impl Display for InvalidEncoding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        return f.write_str("Invalid timestamp string encoding");
+        f.write_str("Invalid timestamp string encoding")
     }
 }
 
@@ -401,10 +411,10 @@ mod tests {
     fn httpdate() {
         let timestamp = Timestamp::now();
 
-        let httpdate: httpdate::HttpDate = timestamp.into();
+        let httpdate = timestamp.format_http_date();
 
         assert_eq!(
-            Timestamp::from(httpdate::parse_http_date(&httpdate.to_string()).unwrap()).0,
+            Timestamp::parse_http_date(&httpdate).unwrap().0,
             timestamp.0 - (timestamp.0 % 1000_000) // Ignore sub seconds
         )
     }
