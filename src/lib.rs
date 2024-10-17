@@ -9,15 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::array::TryFromSliceError;
 use std::error::Error;
 use std::fmt::Display;
+use std::time::{Duration, SystemTime};
 use std::{
     ops::{Add, AddAssign, Sub, SubAssign},
     sync::Mutex,
 };
 
 use once_cell::sync::Lazy;
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::SystemTime;
 
 /// ~0.4% chance of none of 10 clocks have matching id.
 const CLOCK_MASK: u64 = (1 << 8) - 1;
@@ -30,7 +28,7 @@ pub struct TimestampFactory {
 
 impl TimestampFactory {
     /// Create a [TimestampFactory] with a random [TimestampFactory::clock_id],
-    /// unless [getrandom] returned and error, in which case it defaults to `0`.
+    /// unless [getrandom()] returned and error, in which case it defaults to `0`.
     pub fn new() -> Self {
         let mut bytes = [0; 8];
         let _ = getrandom(&mut bytes);
@@ -80,7 +78,7 @@ pub static DEFAULT_FACTORY: Lazy<Mutex<TimestampFactory>> =
 /// to act as a sortable Id.
 ///
 /// U64 of microseconds is valid for the next 500 thousand years!
-#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Eq, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Hash, Eq, Ord)]
 pub struct Timestamp(u64);
 
 impl Timestamp {
@@ -116,8 +114,8 @@ impl TryFrom<&[u8]> for Timestamp {
     }
 }
 
-impl From<&Timestamp> for [u8; 8] {
-    fn from(timestamp: &Timestamp) -> Self {
+impl From<Timestamp> for [u8; 8] {
+    fn from(timestamp: Timestamp) -> Self {
         timestamp.0.to_be_bytes()
     }
 }
@@ -136,7 +134,7 @@ impl From<u64> for Timestamp {
 
 impl From<&Timestamp> for Timestamp {
     fn from(timestamp: &Timestamp) -> Self {
-        timestamp.clone()
+        *timestamp
     }
 }
 
@@ -146,39 +144,94 @@ impl From<Timestamp> for u64 {
     }
 }
 
-impl From<&Timestamp> for u64 {
-    fn from(value: &Timestamp) -> Self {
-        value.as_u64()
+impl From<Timestamp> for SystemTime {
+    fn from(timestamp: Timestamp) -> Self {
+        let secs = timestamp.0 / 1_000_000; // Extract seconds
+        let subsec_nanos = (timestamp.0 % 1_000_000) * 1_000; // Convert remaining microseconds to nanoseconds
+
+        SystemTime::UNIX_EPOCH + Duration::new(secs, subsec_nanos as u32)
     }
 }
 
-// === U64 conversion ===
+impl From<SystemTime> for Timestamp {
+    fn from(system_time: SystemTime) -> Self {
+        (system_time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time drift")
+            .as_micros() as u64)
+            .into()
+    }
+}
 
-impl Add<u64> for &Timestamp {
+#[cfg(feature = "httpdate")]
+impl From<Timestamp> for httpdate::HttpDate {
+    fn from(value: Timestamp) -> Self {
+        SystemTime::from(value).into()
+    }
+}
+
+#[cfg(feature = "httpdate")]
+impl From<httpdate::HttpDate> for Timestamp {
+    fn from(value: httpdate::HttpDate) -> Self {
+        SystemTime::from(value).into()
+    }
+}
+
+// === Operations ===
+
+impl Add<u64> for Timestamp {
     type Output = Timestamp;
 
     fn add(self, rhs: u64) -> Self::Output {
-        Timestamp(self.0 + rhs)
+        Timestamp(self.0.checked_add(rhs).unwrap_or(u64::MAX))
     }
 }
 
-impl Sub<u64> for &Timestamp {
+impl Sub<u64> for Timestamp {
     type Output = Timestamp;
 
     fn sub(self, rhs: u64) -> Self::Output {
-        Timestamp(self.0 - rhs)
+        Timestamp(self.0.checked_sub(rhs).unwrap_or(0))
     }
 }
 
 impl AddAssign<u64> for Timestamp {
     fn add_assign(&mut self, other: u64) {
-        self.0 += other;
+        self.0 = self.0.checked_add(other).unwrap_or(u64::MAX);
     }
 }
 
 impl SubAssign<u64> for Timestamp {
     fn sub_assign(&mut self, other: u64) {
-        self.0 -= other;
+        self.0 = self.0.checked_sub(other).unwrap_or(0);
+    }
+}
+
+impl Add<Timestamp> for Timestamp {
+    type Output = Timestamp;
+
+    fn add(self, rhs: Timestamp) -> Self::Output {
+        self + rhs.0
+    }
+}
+
+impl Sub<Timestamp> for Timestamp {
+    type Output = Timestamp;
+
+    fn sub(self, rhs: Timestamp) -> Self::Output {
+        self - rhs.0
+    }
+}
+
+impl AddAssign<Timestamp> for Timestamp {
+    fn add_assign(&mut self, other: Timestamp) {
+        self.0 = self.0.checked_add(other.0).unwrap_or(u64::MAX);
+    }
+}
+
+impl SubAssign<Timestamp> for Timestamp {
+    fn sub_assign(&mut self, other: Timestamp) {
+        self.0 = self.0.checked_sub(other.0).unwrap_or(0);
     }
 }
 
@@ -212,7 +265,7 @@ impl Display for Timestamp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         #[cfg(feature = "base32")]
         {
-            let bytes: [u8; 8] = self.into();
+            let bytes: [u8; 8] = self.to_owned().into();
             return f.write_str(&base32::encode(base32::Alphabet::Crockford, &bytes));
         }
         #[cfg(not(feature = "base32"))]
@@ -341,5 +394,18 @@ mod tests {
         let deserialized: Timestamp = postcard::from_bytes(&serialized).unwrap();
 
         assert_eq!(deserialized, timestamp);
+    }
+
+    #[cfg(feature = "httpdate")]
+    #[test]
+    fn httpdate() {
+        let timestamp = Timestamp::now();
+
+        let httpdate: httpdate::HttpDate = timestamp.into();
+
+        assert_eq!(
+            Timestamp::from(httpdate::parse_http_date(&httpdate.to_string()).unwrap()).0,
+            timestamp.0 - (timestamp.0 % 1000_000) // Ignore sub seconds
+        )
     }
 }

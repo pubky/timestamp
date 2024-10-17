@@ -6,6 +6,7 @@ edition = "2021"
 description = "Strictly monotonic unix timestamp in microseconds"
 license = "MIT"
 repository = "https://github.com/pubky/timestamp"
+keywords = ["time", "monotonic", "timestamp"]
 
 [dependencies]
 once_cell = "1.20.2"
@@ -15,6 +16,7 @@ document-features = "0.2.8"
 # Optional dependencies
 serde = { version = "1.0.210", default-features = false, features = ["derive"], optional = true }
 base32 = { version = "0.5.1", optional = true }
+httpdate = { version = "1.0.3", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3.69"
@@ -26,10 +28,9 @@ postcard = { version = "1.0.10", features = ["alloc"] }
 ## Enable serde derive for [Timestamp]
 serde = ["dep:serde"]
 base32 = ["dep:base32"]
+httpdate = ["dep:httpdate"]
 
-full = ["serde", "base32"]
-
-default = ["full"]
+full = ["serde", "base32", "httpdate"]
 
 [package.metadata.docs.rs]
 all-features = true
