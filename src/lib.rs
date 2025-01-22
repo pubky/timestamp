@@ -77,7 +77,8 @@ pub static DEFAULT_FACTORY: Lazy<Mutex<TimestampFactory>> =
 /// If a `utf-8` encoding is necessary, it is encoded as [base32::Alphabet::Crockford]
 /// to act as a sortable Id.
 ///
-/// U64 of microseconds is valid for the next 500 thousand years!
+/// U64 (through pubky) of microseconds is valid for the next ~600 thousand years!
+/// i64 (in mainline)   of microseconds is valid for the next ~300 thousand years!
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Hash, Eq, Ord)]
 pub struct Timestamp(u64);
 
