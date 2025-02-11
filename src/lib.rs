@@ -3,7 +3,6 @@
 #![doc = document_features::document_features!()]
 //!
 
-use getrandom::getrandom;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::array::TryFromSliceError;
@@ -31,7 +30,7 @@ impl TimestampFactory {
     /// unless [getrandom()] returned and error, in which case it defaults to `0`.
     pub fn new() -> Self {
         let mut bytes = [0; 8];
-        let _ = getrandom(&mut bytes);
+        let _ = getrandom::fill(&mut bytes);
 
         Self {
             clock_id: u64::from_le_bytes(bytes) & CLOCK_MASK,
@@ -70,7 +69,7 @@ pub static DEFAULT_FACTORY: Lazy<Mutex<TimestampFactory>> =
 /// it achieves this by:
 ///     1. Override the last byte with a random `clock_id`, reducing the probability
 ///         of two matching timestamps across multiple machines/threads.
-///     2. Gurantee that the remaining 3 bytes are ever increasing (strictly monotonic) within
+///     2. Guarantee that the remaining 3 bytes are ever increasing (strictly monotonic) within
 ///         the same thread regardless of the wall clock value
 ///
 /// This timestamp is also serialized as BE bytes to remain sortable.
@@ -320,7 +319,7 @@ fn system_time() -> u64 {
     {
         // Won't be an issue for more than 5000 years!
         (js_sys::Date::now() as u64 )
-        // Turn miliseconds to microseconds
+        // Turn milliseconds to microseconds
         * 1000
     }
 }
