@@ -30,7 +30,7 @@ impl TimestampFactory {
     /// unless [getrandom()] returned and error, in which case it defaults to `0`.
     pub fn new() -> Self {
         let mut bytes = [0; 8];
-        let _ = getrandom::fill(&mut bytes);
+        let _ = getrandom::getrandom(&mut bytes);
 
         Self {
             clock_id: u64::from_le_bytes(bytes) & CLOCK_MASK,
